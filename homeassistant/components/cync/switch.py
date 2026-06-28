@@ -2,14 +2,14 @@
 
 from typing import Any
 
-from pycync.devices.devices import CyncDevice
 from pycync.devices.device_types import DeviceType
+from pycync.devices.devices import CyncDevice
 
 from homeassistant.components.switch import SwitchDeviceClass, SwitchEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from .coordinator import CyncConfigEntry, CyncCoordinator
+from .coordinator import CyncConfigEntry
 from .entity import CyncBaseEntity
 
 
@@ -51,18 +51,13 @@ class CyncSwitchEntity(CyncBaseEntity, SwitchEntity):
     _attr_device_class = SwitchDeviceClass.OUTLET
     _attr_name = None
 
-    @property
-    def is_on(self) -> bool | None:
-        """Return None — pycync 0.5.0 does not track on/off state for plugs."""
-        return None
-
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn on the plug."""
-        await self._device._command_client.set_power_state(self._device, True)
+        await self._device.turn_on()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn off the plug."""
-        await self._device._command_client.set_power_state(self._device, False)
+        await self._device.turn_off()
 
     @property
     def _device(self) -> CyncDevice:
