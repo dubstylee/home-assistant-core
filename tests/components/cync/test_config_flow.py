@@ -106,6 +106,10 @@ async def test_form_reauth_success(
 ) -> None:
     """Test we handle re-authentication with two-factor."""
     mock_config_entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(
+        mock_config_entry,
+        data={**mock_config_entry.data, "device_ids_migration_pending": True},
+    )
     result = await mock_config_entry.start_reauth_flow(hass)
     assert result["step_id"] == "reauth_confirm"
 
@@ -134,6 +138,7 @@ async def test_form_reauth_success(
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reauth_successful"
     assert mock_config_entry.data == {
+        "device_ids_migration_pending": True,
         CONF_USER_ID: MOCKED_USER.user_id,
         CONF_AUTHORIZE_STRING: "test_authorize_string",
         CONF_EXPIRES_AT: ANY,
