@@ -78,7 +78,6 @@ def mock_config_entry() -> MockConfigEntry:
     """Mock a Cync config entry."""
     return MockConfigEntry(
         domain=DOMAIN,
-        version=2,
         title=MOCKED_EMAIL,
         unique_id=str(MOCKED_USER.user_id),
         data={

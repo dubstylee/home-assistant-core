@@ -40,7 +40,6 @@ async def test_preserve_registry_identifiers(
 ) -> None:
     """Test existing light and device customizations survive setup and reload."""
     mock_config_entry.add_to_hass(hass)
-    hass.config_entries.async_update_entry(mock_config_entry, version=1)
     area = area_registry.async_get_or_create("Porch")
     device = device_registry.async_get_or_create(
         config_entry_id=mock_config_entry.entry_id,
@@ -74,8 +73,6 @@ async def test_preserve_registry_identifiers(
     current_device = device_registry.async_get(device.id)
     assert current_device is not None
     assert current_device.identifiers == {(DOMAIN, f"mesh:{mesh_id}")}
-    assert mock_config_entry.version == 2
-    assert "device_ids_migration_pending" not in mock_config_entry.data
     assert current_device.area_id == area.id
     assert current_device.labels == {"outside"}
     assert current_device.name_by_user == "Porch light"
@@ -115,7 +112,6 @@ async def test_preserve_device_without_entity(
 ) -> None:
     """Test an offline light reuses its device after its entity was removed."""
     mock_config_entry.add_to_hass(hass)
-    hass.config_entries.async_update_entry(mock_config_entry, version=1)
     area = area_registry.async_get_or_create("Porch")
     device = device_registry.async_get_or_create(
         config_entry_id=mock_config_entry.entry_id,
@@ -207,7 +203,6 @@ async def test_retry_device_identifier_migration(
 ) -> None:
     """Test partial migration retries preserve devices and other identifiers."""
     mock_config_entry.add_to_hass(hass)
-    hass.config_entries.async_update_entry(mock_config_entry, version=1)
     first = device_registry.async_get_or_create(
         config_entry_id=mock_config_entry.entry_id,
         identifiers={(DOMAIN, "1000-1101"), ("other", "light")},
@@ -225,8 +220,6 @@ async def test_retry_device_identifier_migration(
         assert not await hass.config_entries.async_setup(mock_config_entry.entry_id)
         await hass.async_block_till_done()
 
-    assert mock_config_entry.version == 2
-    assert mock_config_entry.data["device_ids_migration_pending"]
     assert device_registry.async_get(first.id).identifiers == {
         (DOMAIN, "mesh:1000-1"),
         ("other", "light"),
@@ -236,7 +229,6 @@ async def test_retry_device_identifier_migration(
 
     assert await hass.config_entries.async_reload(mock_config_entry.entry_id)
     await hass.async_block_till_done()
-    assert "device_ids_migration_pending" not in mock_config_entry.data
     assert device_registry.async_get(first.id).identifiers == {
         (DOMAIN, "mesh:1000-1"),
         ("other", "light"),
@@ -260,7 +252,6 @@ async def test_device_identifier_namespace(
 ) -> None:
     """Test a mesh ID matching another light's cloud ID cannot merge devices."""
     mock_config_entry.add_to_hass(hass)
-    hass.config_entries.async_update_entry(mock_config_entry, version=1)
     lights = cync_client.get_homes.return_value[0].get_flattened_device_list()
     lights[1].mesh_device_id = 1101
     first = device_registry.async_get_or_create(
@@ -294,9 +285,8 @@ async def test_connection_failure_before_device_migration(
     cync_client: MagicMock,
     device_registry: dr.DeviceRegistry,
 ) -> None:
-    """Test connection failures leave the migration pending for a setup retry."""
+    """Test connection failures leave legacy identifiers intact until setup retries."""
     mock_config_entry.add_to_hass(hass)
-    hass.config_entries.async_update_entry(mock_config_entry, version=1)
     device = device_registry.async_get_or_create(
         config_entry_id=mock_config_entry.entry_id,
         identifiers={(DOMAIN, "1000-1101")},
@@ -306,12 +296,48 @@ async def test_connection_failure_before_device_migration(
     assert not await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
     assert mock_config_entry.state is ConfigEntryState.SETUP_RETRY
-    assert mock_config_entry.version == 2
-    assert mock_config_entry.data["device_ids_migration_pending"]
     assert device_registry.async_get(device.id).identifiers == {(DOMAIN, "1000-1101")}
 
     cync_client.create.side_effect = None
     assert await hass.config_entries.async_reload(mock_config_entry.entry_id)
     await hass.async_block_till_done()
-    assert "device_ids_migration_pending" not in mock_config_entry.data
     assert device_registry.async_get(device.id).identifiers == {(DOMAIN, "mesh:1000-1")}
+
+
+async def test_device_missing_until_later_setup(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    cync_client: MagicMock,
+    device_registry: dr.DeviceRegistry,
+    entity_registry: er.EntityRegistry,
+) -> None:
+    """Test a device absent from the API migrates when it returns on reload."""
+    mock_config_entry.add_to_hass(hass)
+    home = cync_client.get_homes.return_value[0]
+    device = device_registry.async_get_or_create(
+        config_entry_id=mock_config_entry.entry_id,
+        identifiers={(DOMAIN, "1000-1101")},
+    )
+    cync_client.get_homes.return_value = []
+    cync_client.get_devices.return_value = []
+
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert device_registry.async_get(device.id).identifiers == {(DOMAIN, "1000-1101")}
+
+    cync_client.get_homes.return_value = [home]
+    cync_client.get_devices.return_value = home.get_flattened_device_list()
+    assert await hass.config_entries.async_reload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert device_registry.async_get(device.id).identifiers == {(DOMAIN, "mesh:1000-1")}
+    entity_id = entity_registry.async_get_entity_id(Platform.LIGHT, DOMAIN, "1000-1101")
+    assert entity_id is not None
+    assert entity_registry.async_get(entity_id).device_id == device.id
+    assert (
+        len(
+            dr.async_entries_for_config_entry(
+                device_registry, mock_config_entry.entry_id
+            )
+        )
+        == 3
+    )

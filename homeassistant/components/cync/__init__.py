@@ -4,7 +4,7 @@ from pycync import Auth, Cync, CyncLight, User
 from pycync.exceptions import AuthFailedError, CyncError
 
 from homeassistant.const import CONF_ACCESS_TOKEN, Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -20,7 +20,6 @@ from .const import (
 from .coordinator import CyncConfigEntry, CyncCoordinator
 
 _PLATFORMS: list[Platform] = [Platform.LIGHT]
-_DEVICE_IDS_MIGRATION_PENDING = "device_ids_migration_pending"
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: CyncConfigEntry) -> bool:
@@ -54,8 +53,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: CyncConfigEntry) -> bool
     await devices_coordinator.async_config_entry_first_refresh()
     entry.runtime_data = devices_coordinator
 
-    if entry.data.get(_DEVICE_IDS_MIGRATION_PENDING):
-        _async_migrate_device_identifiers(hass, entry, cync)
+    _async_migrate_device_identifiers(hass, entry, cync)
 
     await hass.config_entries.async_forward_entry_setups(entry, _PLATFORMS)
 
@@ -67,6 +65,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: CyncConfigEntry) -> boo
     return await hass.config_entries.async_unload_platforms(entry, _PLATFORMS)
 
 
+@callback
 def _async_migrate_device_identifiers(
     hass: HomeAssistant, entry: CyncConfigEntry, cync: Cync
 ) -> None:
@@ -87,20 +86,3 @@ def _async_migrate_device_identifiers(
         }
         if new_identifiers != device.identifiers:
             registry.async_update_device(device.id, new_identifiers=new_identifiers)
-
-    data = dict(entry.data)
-    del data[_DEVICE_IDS_MIGRATION_PENDING]
-    hass.config_entries.async_update_entry(entry, data=data)
-
-
-async def async_migrate_entry(hass: HomeAssistant, entry: CyncConfigEntry) -> bool:
-    """Schedule device identifier migration after the client connects."""
-    if entry.version > 2:
-        return False
-    if entry.version == 1:
-        hass.config_entries.async_update_entry(
-            entry,
-            data={**entry.data, _DEVICE_IDS_MIGRATION_PENDING: True},
-            version=2,
-        )
-    return True
