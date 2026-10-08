@@ -30,8 +30,9 @@ class CyncBaseEntity(CoordinatorEntity[CyncCoordinator]):
         self._cync_unique_id = device.unique_id
         self._attr_unique_id = device.unique_id if unique_id is None else unique_id
 
+        # Keep mesh identifiers disjoint from legacy cloud identifiers.
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self._attr_unique_id)},
+            identifiers={(DOMAIN, f"mesh:{device.unique_id}")},
             manufacturer="GE Lighting",
             name=device.name,
             suggested_area=room_name,
